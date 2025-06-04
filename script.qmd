@@ -3,7 +3,6 @@ title: "The impact of lost direct democratic votes on resignations of Swiss Fede
 subtitle: "Lecture Statistical Modeling for Political Research"
 author:
   - name: Lucas Moser
-    affiliation: 18-739-763
 lang: en
 date: today
 date-format: "D. MMMM YYYY"
