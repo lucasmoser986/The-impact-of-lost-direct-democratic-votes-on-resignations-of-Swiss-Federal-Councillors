@@ -1,0 +1,300 @@
+---
+title: "The impact of lost direct democratic votes on resignations of Swiss Federal Councillors"
+subtitle: "Lecture Statistical Modeling for Political Research"
+author:
+  - name: Lucas Moser
+    affiliation: 18-739-763
+lang: en
+date: today
+date-format: "D. MMMM YYYY"
+format: 
+  pdf:
+    toc-title: Table of contents
+    toc: true
+    toc-depth: 2
+    documentclass: scrreprt
+    mainfont: "Times New Roman"
+    fig-pos: "h"
+    tbl-pos: "h"
+execute:
+  echo: false
+  warning: false
+knitr::opts_chunk(message: FALSE, set(dev = 'eps'))
+include-in-header:
+  text: |
+   \usepackage{authblk}
+bibliography: references.bib
+---
+
+# Introduction
+
+In Switzerland, the executive, the Federal Council, is in a unique institutional position. Its seven members are elected by the parliament quadrennially and, once elected, can't be removed from office until the next election four years later. Furthermore, it is very rare for Federal Councillors to not be reelected by parliament or to die in office, leaving voluntary resignation as the cause for most  Councillors' exits from government. While a few Federal Councillors have been (informally, through public pressure) forced to resign due to political scandals, resignation is truly voluntary for most Councillors [@Vatter2020: 29, 118-131]. This paper examines the impact of the legislative success of Federal Councillors on their decision to resign. I analyse whether losing in direct democratic votes makes Federal Councillors more likely to resign.
+
+# Theory
+
+Federal Councillors, serving on average for around ten years [@Vatter2020: 121], are usually allowed to remain in office for as long as they want. Individual Councillors are shielded from public pressure because the Council convenes and makes decisions in private, and publicly, Councillors only advocate for the positions of the whole Council, not their own (principle of collegiality). Thus, it's difficult to hold an individual Councillor accountable for their actions and their decision to resign will mainly depend on their satisfaction with their job. That satisfaction is likely in part determined by their success in passing legislation. Each Councillor heads one of the seven federal departments, which are among other things tasked with drafting legislation at the request of parliament. After a years-long legislative process, these bills are sometimes defeated in a referendum, dealing a blow to the department and Councillor responsible for the bill. A bill that isn't drafted by the Federal Council (i.e. a popular and parliamentary initiative) is also assigned to a department. In the run up to a direct democratic vote, the Councillor heading the department responsible for the bill is tasked with informing the public about the bill and with campaigning for the Federal Council's position, approval or rejection [@Milic2014: 320]. Losing the direct democratic vote on such a bill can also be seen as a failure of the responsible Federal Councillor.
+\
+My main hypothesis for this paper is that after losing a direct democratic vote, the Federal Councillor responsible for the bill is more likely to resign soon compared to after winning a vote. \
+I expect this effect to be stronger for bills drafted by a department (compared to popular and parliamentary initiatives). I also expect the effect to be stronger the longer the Federal Councillor has been in office. If a Federal Councillor has already served for a few years and is considering resigning, a defeat in a direct democratic vote might be the final nail in the coffin for them. Further, I expect the effect to be stronger when the Federal Councillor is personally in favor of the bill. Due to the principle of collegiality, Councillors sometimes have to draft and campaign for bills that they personally oppose. In that case, seeing the bill be defeated in the direct democratic vote might not feel like a failure to them. Finally, I expect the effect to be stronger the more votes the Federal Councillor has lost during his entire tenure.
+
+# Variables, Data and Method
+
+The units of observations are 293 direct democratic votes from 1990 to 2024.
+For the dependent variable, I construct a binary variable that indicates whether the Federal Councillor that was responsible for the bill resigned within 6 months after the vote.
+The independent variable indicates whether the responsible Councillor lost the vote (i.e. whether the position of the Federal Council lost).
+For the moderating factors, I construct a binary variable indicating whether the bill was drafted by a department (i.e. whether it is not a popular or parliamentary initiative) and a variable for the seniority of the Councillor at the time of the vote (measured in years). Due to the principle of collegiality, we usually don't know whether a Councillor is personally in favor of a bill. For this factor, I use an instrumental variable: a binary variable indicating whether the Councillor's party has the same stance on the bill as the Federal Council. Finally, I measure a Councillor's (negative) track record as the share of the votes which they were responsible for that they lost.
+I exclude a few votes: Sometimes a popular initiative and a government drafted counter proposal are voted on at the same time (where only one of the two can be adopted). For these instances, I only include the vote on the government drafted counter proposal. I also exclude votes that are assigned to the Federal Chancellery instead of one of the federal departments and votes for which one of the two Councillors who lost reelection (Metzler-Arnold and Blocher) were responsible, since they never chose to resign.
+The data on the direct democratic votes (e.g. date, responsible department, Council and parties's positions, result) is taken from @Swissvotes2024. The data on the Federal Councillors (e.g. department, party affiliation, date of resignation) is taken from @Altermatt2019 and updated for the most recent years using Wikipedia.
+Since the dependent variable is binary, I test my hypotheses using logistic regression (probit).
+
+
+```{r}
+#packages
+library(readxl)
+library(dplyr)
+library(stringr)
+
+#read data and subset
+suppressWarnings({
+  votes = read_xlsx("swissvotes.xlsx", sheet = 2)
+  })
+councillors = read_xlsx("councillors.xlsx", sheet = 1)
+councillors$Name = word(councillors$Name, 1)
+departments = read_xlsx("councillors.xlsx", sheet = 2)
+votes = votes[which(as.Date(votes$datum, format = "%d.%m.%Y") >
+                      as.Date("01.01.1983", format = "%d.%m.%Y")),
+              c(1:3, 11, 26, 27, 34, 49, 88:91, 103, 104, 643, 652)]
+
+#Tidy data
+#Variable names
+colnames(votes) = c("id", "date", "title", "popular_initiative", "department", "p_fc",
+                    "parliamentary_initiative", "date_message", "p_FDP", "p_SP", "p_SVP", "p_mitte",
+                    "p_CVP", "p_BDP", "adopted","yes_voteshare")
+#Fix dates
+votes$date_message = as.Date(ifelse(nchar(votes$date_message) == 8, 
+                           paste(substr(votes$date_message,1,6),"20",substr(votes$date_message,7,8),
+                                 sep = ""), votes$date_message), format="%d.%m.%Y")
+votes$date = as.Date(votes$date, format="%d.%m.%Y")
+#Variable for year of vote
+votes$year = format(votes$date, "%Y")
+#Merge CVP & Mitte
+votes$p_CVP = ifelse(votes$p_CVP == 9999, votes$p_mitte, votes$p_CVP)
+#Remove initiative with conjoined referendum and bills assigned to chancelery
+votes = votes[-(which(substr(as.character(votes$id), 5, 5) %in% c("1", "3") |
+                  votes$department == 8)), -12]
+#Recode departments
+votes$department = case_match(votes$department, "1" ~ "EDA", "2" ~ "EDI", "3" ~ "EJPD",
+                              "4" ~ "VBS", "5" ~ "EFB", "6" ~ "WBF", "7" ~ "UVEK")
+#Recode pop. initiatives
+votes$popular_initiative = ifelse(votes$popular_initiative == 3, 1, 0)
+#Recode party stances on votes
+votes[,c(6, 9:13)] = lapply(votes[,c(6, 9:13)], function(x) {
+  ifelse(x == 1, 1, 0)
+})
+
+#Merge department heads into votes data
+votes$head = NA
+for (i in 1:length(votes$id)) {
+  votes$head[i] = pull(departments[match(votes$year[i], departments$Jahr),
+                              match(votes$department[i], colnames(departments))])
+}
+#assign correct head for instances of department change during the year
+v0 = votes[grep("/",votes$head),c(2,17)]
+res = as.Date(councillors$Rücktritt[which(substr(as.character(councillors$Rücktritt),1,5)
+                                          != "31.12")], format = "%d.%m.%Y")
+v0$resignation = as.Date(NA, format = "%d.%m.%Y")
+db = grep("/",votes$head)
+for (i in 1:length(v0$date)) {
+  v0$resignation[i] = res[which(format(res, "%Y") ==
+                                  format(v0$date[i], "%Y"))[1]]
+  if (v0$date[i] < v0$resignation[i]) {
+  votes$head[db[i]] = word(v0$head[i], 1)
+  } else {
+  votes$head[db[i]] = word(v0$head[i], 3)  
+  }
+}
+
+#Remove Councillors that lost reelection
+votes = votes[-which(votes$head %in% c("Metzler", "Blocher")),]
+#Remove vote of 2025 
+votes = votes[-length(votes$id),]
+#Merge Councillor data into votes data
+votes$head_party = councillors$Partei[match(votes$head, councillors$Name)]
+votes$head_election = as.Date(councillors$Wahl[match(votes$head, councillors$Name)],
+                             format = "%d.%m.%Y")
+votes$head_resignation = as.Date(councillors$Rücktritt[match(votes$head, councillors$Name)],
+                             format = "%d.%m.%Y")
+votes$head_resignation = case_match(votes$head_resignation,
+                                   NA ~ as.Date("31.12.2030", format ="%d.%m.%Y"),
+                                   .default = votes$head_resignation)
+votes$id = seq(length(votes$id))
+
+#Dependent variable
+votes$head_resigned6 = ifelse(votes$head_resignation - votes$date < 180, 1, 0)
+votes$head_resigned12 = ifelse(votes$head_resignation - votes$date < 360, 1, 0)
+votes$head_resigned3 = ifelse(votes$head_resignation - votes$date < 90, 1, 0)
+votes$head_resigned9 = ifelse(votes$head_resignation - votes$date < 270, 1, 0)
+
+#Independent variable
+votes$fc_won = ifelse(votes$p_fc == votes$adopted, 1, 0)
+votes$fc_lost = ifelse(votes$p_fc == votes$adopted, 0, 1)
+
+
+#Interaction Variables and Controls
+votes$head_trackrecord_fc = NA
+votes$head_trackrecord_party = NA
+for (i in 1:length(votes$id)) {
+  votes$head_trackrecord_fc[i] =
+    mean(votes[which((votes$id <= i) & votes$head == votes$head[i]),]$fc_lost)
+}
+votes$head_seniority = as.numeric(difftime(votes$date, votes$head_election, unit = "weeks")) / 52.25
+votes$department_bill = ifelse(votes$popular_initiative == 0 &
+                                 votes$parliamentary_initiative == 0, 1, 0)
+
+votes$head_party_lost = NA
+votes$head_agree = NA
+votes$coalition = NA
+votes$coalition_parties = NA
+votes = votes[-which(is.na(votes$head_party)),]
+for (i in 1:length(votes$id)) {
+  votes$head_party_lost[i] = ifelse(votes[[paste("p_", votes$head_party[i], sep = "")]][i] ==
+                                     votes$adopted[i], 0, 1)
+  
+  votes$head_trackrecord_party[i] =
+    mean(votes[which((votes$id <= i) & votes$head == votes$head[i]),]$head_party_lost)
+  
+  votes$head_agree[i] =
+    ifelse(votes$p_fc[i] == votes[[paste("p_", votes$head_party[i], sep = "")]][i], 1, 0)
+  
+  votes$coalition[i] = length(which(votes[i,9:12] == votes$p_fc[i]))
+  
+  if (min(votes$p_SP[i], votes$p_CVP[i], votes$p_FDP[i], votes$p_SVP[i]) == 
+    max(votes$p_SP[i], votes$p_CVP[i], votes$p_FDP[i], votes$p_SVP[i])) {
+    votes$coalition_parties[i] = "SP-CVP-FDP-SVP"
+  } else if (min(votes$p_CVP[i], votes$p_FDP[i], votes$p_SVP[i]) == 
+    max(votes$p_CVP[i], votes$p_FDP[i], votes$p_SVP[i])) {
+    votes$coalition_parties[i] = "CVP-FDP-SVP"
+    } else if (min(votes$p_SP[i], votes$p_CVP[i], votes$p_FDP[i], votes$p_SP[i]) == 
+    max(votes$p_SP[i], votes$p_CVP[i], votes$p_FDP[i], votes$p_SP[i])) {
+    votes$coalition_parties[i] = "SP-CVP-FDP"
+    } else if (min(votes$p_fc[i], votes$p_FDP[i], votes$p_SVP[i]) == 
+    max(votes$p_fc[i], votes$p_FDP[i], votes$p_SVP[i])) {
+    votes$coalition_parties[i] = "FDP-SVP"
+    } else if (min(votes$p_fc[i], votes$p_SP[i], votes$p_CVP[i]) == 
+    max(votes$p_fc[i], votes$p_SP[i], votes$p_CVP[i])) {
+    votes$coalition_parties[i] = "SP-CVP"
+    } else {
+    votes$coalition_parties[i] = "Other"
+    }
+}
+
+#Subset votes for 1990-2024
+votes = votes[which(as.Date(votes$date, format = "%d.%m.%Y") >
+                      as.Date("01.01.1990", format = "%d.%m.%Y")),]
+
+```
+
+# Results and Discussion
+
+```{r}
+library(glm.predict)
+library(huxtable)
+library(ggplot2)
+
+#No moderators or controls
+m1 = glm(head_resigned6 ~ fc_lost, 
+                   data = votes, family = binomial(link = probit))
+
+m11 = glm(head_resigned3 ~ fc_lost, 
+                   data = votes, family = binomial(link = probit))
+
+m12 = glm(head_resigned9 ~ fc_lost, 
+                   data = votes, family = binomial(link = probit))
+
+m13 = glm(head_resigned12 ~ fc_lost, 
+                   data = votes, family = binomial(link = probit))
+
+#Add seniority and track record
+m2 = glm(head_resigned6 ~ fc_lost + head_seniority + head_trackrecord_fc, 
+                   data = votes, family = binomial(link = probit))
+
+m3 = glm(head_resigned6 ~ head_seniority + head_trackrecord_fc, 
+                   data = votes, family = binomial(link = probit))
+
+#Party instead of FC based track record
+m4 = glm(head_resigned6 ~ head_seniority + head_trackrecord_party + head_party, 
+                   data = votes, family = binomial(link = probit))
+
+#Tables
+title1 = c("Table 1: Impact of losing a vote on chance of resignation within 6, 3, 9, 12 months")
+table1 = huxreg(m1,m11,m12,m13, bold_signif = 0.05, number_format = "%.2f",
+                statistics = c(N = "nobs", "logLik", "AIC")) %>%
+  insert_row(title1, fill = "", colspan = 5) %>%
+  set_bottom_border(row = 1, col = c(1:5))
+table1[5,1] = c("Vote lost")
+
+title2 = c("Table 2: Impact of losing a vote, seniority and track record on chance of resignation within 6 months")
+table2 = huxreg(m2,m3,m4, bold_signif = 0.05, number_format = "%.2f",
+                statistics = c(N = "nobs", "logLik", "AIC")) %>%
+  insert_row(title2, fill = "", colspan = 4) %>%
+  set_bottom_border(row = 1, col = c(1:4))
+table2[c(5,7,9,11,13,15,17,19),1] = c("Vote lost", "Seniority", "Track record (Council positions)", 
+                                      "Track record (party positions)", "Councillor of CVP",
+                                      "Councillor of FDP", "Councillor of SP", "Councillor of SVP")
+table2[2,c(2:4)] = c("(5)","(6)","(7)")
+
+#p-values
+#summary.glm(m1)
+#summary.glm(m2)
+#summary.glm(m3)
+#summary.glm(m4)
+
+#Predicted probabilities
+pred1 = predicts(m3, "8-14,2;all", type = "simulation", set.seed = 1234)
+pred1$head_seniority = factor(paste(pred1$head_seniority, "years in office"),
+                              levels = c("8 years in office", "10 years in office",
+                                         "12 years in office", "14 years in office"))
+plot1 = ggplot(pred1, aes(x = head_trackrecord_fc, y = mean, ymin = lower, ymax = upper)) +
+  geom_errorbar(alpha = 0.3) + geom_point() + 
+  facet_wrap(~head_seniority) +
+  theme_bw() +
+  labs(title = "Figure 1: Predicted probabilities of resignation for different\nseniorities (95% confidence intervals)") +
+       xlab("Share of votes lost by Councillor (Council's position)") +
+       ylab("Predicted probability of resigning within 6 months after the vote")
+
+pred2 = predicts(m4, "12;all;F(2,3,4,5)", type = "simulation", set.seed = 1234)
+plot2 = ggplot(pred2, aes(x = head_trackrecord_party, y = mean, ymin = lower, ymax = upper)) +
+  geom_errorbar(alpha = 0.3) + geom_point() + 
+  facet_wrap(~head_party) +
+  theme_bw() +
+  labs(title = "Figure 2: Predicted probabilities of resignation at 12 years\nin office (95% confidence intervals)") +
+       xlab("Share of votes lost by Councillor (Councillor's party's position)") +
+       ylab("Predicted probability of resigning within 6 months after the vote")
+
+#Share of wins by party
+tb = scale(t(table(votes$head_party,votes$head_party_lost)),
+           center=F, scale=colSums(t(table(votes$head_party,votes$head_party_lost))))
+
+```
+
+```{r}
+table1
+```
+
+Model (1) in Table 1 above predicts the effect of losing a vote on a Federal Councillor's chance of resigning within 6 months after the vote, without control or interaction variables. Surprisingly, the coefficient exhibits a negative sign, meaning that on average, Councillors are less likely to resign after losing a vote. The effect isn't significant, however (*p* = 0.32). The result remains the same when the time period for the dependent variable is changed from resignation within 6 months to 3, 9 or 12 months, shown in models (2) through (4) in Table 1.
+\
+Model (5) and (6) in Table 2 further below add the seniority of the Councillor and their track record (share of *lost* votes) as predictors. When controlling for seniority (naturally, higher seniority increases the chances of resignation) and track record, the original independent variable indicating whether the Councillor lost the vote remains nonsignificant (*p* = 0.48), however, the sign is now positive. Model (6) drops this variable. It shows that the track record has a significant impact on resignations (*p* < 0.001) but the sign is also negative. The more votes a Councillor has lost, the lower their odds of resigning shortly after a direct democratic vote. Councillors who have lost more votes might want to remain in office in the hope of being able to secure some wins in the future, while more successful Councillors might be content with resigning after reaching a certain seniority. Figure 1 below shows predicted probabilities for resignation within 6 months after a vote for Councillors that have been in office for 8, 10, 12 and 14 years. For Councillors that have been in office for a long time (12 or 14 years), the predicted probabilities of resignation are close to 100% for Councillors who have won a high share (near 100%) of their votes and drops to zero percent for Councillors who only won have their votes.
+\
+Model (7) in Table 2 examines a different track record variable. Instead of classifying a vote as won if the Federal Council's position won, which the responsible Councillor doesn't necessarily agree with, a vote is classified as won by the responsible Federal Councillor if their party's position won. The model includes the Councillor's party as a control variable, since parties closer to the center are more likely to win direct democratic votes (CVP and FDP won 81% and 77% of all votes held since 1990) than parties on the poles (SVP and SP won 60% and 53%). The party based track record also has a negative impact on resignations (*p* = 0.013). Figure 2 below shows predicted probabilities for resignation within 6 months after a vote for Councillors of the four government parties (the party BDP, which was represented by only one Councillor for 8 years, is not shown). We can see that a worsening track record (having lost more votes) reduces the odds of resignation for Councillors of CVP, FDP and SVP from between 65% and 75% down to close to zero percent. There is no effect for the party SP, however. The 95% confidence bands are quite large for all parties.
+\
+```{r,fig.height=5}
+table2
+plot1
+plot2
+```
+
+# Conclusion
+
+We have seen that the outcomes of individual direct democratic votes have no significant impact on Councillor's resignations but that the overall track record of a Councillor's lost votes makes them less likely to resign, contrary to expectation. Apart from resignation, Councillors may also react to lost direct democratic votes by switching departments. If a Councillor looses many votes, they might remain in office longer but try to be more successful at the head of a new department.
+
+# References
